@@ -48,8 +48,6 @@ class Atlas:
           "offset": 0
         }
 
-        print(params)
-
         search_results = self.connection.search_basic(**params)
         guids = [entity.guid for search_result in search_results for entity in search_result.entities]
 
@@ -57,7 +55,7 @@ class Atlas:
             return guids[0]
 
     def create_schema(self, schema, instance=None):
-        schema_guid = self.get_schema_guid(schema)
+        schema_guid = self.get_schema_guid(f"{instance}.{schema}")
 
         if not schema_guid:
             params = {
@@ -69,19 +67,19 @@ class Atlas:
                             "guid": self.get_instance_guid(instance),
                             "typeName": "Instance",
                         },
-                        "qualifiedName": schema,
+                        "qualifiedName": f"{instance}.{schema}",
                         "name": schema
                     }
                 }
             }
 
-            schema_guid = self.connection.entity_post.create(data=params)['mutatedEntities']['CREATE'][0]['guid']
+            schema_guid = list(self.connection.entity_post.create(data=params)['guidAssignments'].values())[0]
 
         return schema_guid
 
     def create_table(self, table, instance=None):
         schema_guid = self.create_schema(table.schema, instance=instance)
-        table_guid = self.get_table_guid(f"{table.schema}.{table.name}")
+        table_guid = self.get_table_guid(f"{instance}.{table.schema}.{table.name}")
 
         if not table_guid:
             params = {
@@ -93,7 +91,7 @@ class Atlas:
                             "guid": schema_guid,
                             "typeName": "Schema",
                         },
-                        "qualifiedName": f"{table.schema}.{table.name}",
+                        "qualifiedName": f"{instance}.{table.schema}.{table.name}",
                         "name": table.name,
                         "type": "external"
                     }
@@ -102,14 +100,14 @@ class Atlas:
 
             response = self.connection.entity_post.create(data=params)
 
-            table_guid = response['mutatedEntities']['CREATE'][0]['guid']
+            table_guid = list(self.connection.entity_post.create(data=params)['guidAssignments'].values())[0]
 
-        self.create_columns(table, table.columns)
+        self.create_columns(table, table.columns, instance=instance)
 
         return table_guid
 
-    def create_columns(self, table, columns, prefix_column_name='', parent_column_guid=None):
-        table_guid = self.get_table_guid(f"{table.schema}.{table.name}")
+    def create_columns(self, table, columns, prefix_column_name='', parent_column_guid=None, instance=None):
+        table_guid = self.get_table_guid(f"{instance}.{table.schema}.{table.name}")
         columns_guid = []
 
         for column in columns:
@@ -124,7 +122,7 @@ class Atlas:
                             "guid": table_guid,
                             "typeName": "Table",
                         },
-                        "qualifiedName": f"{table.schema}.{table.name}.{column_name}",
+                        "qualifiedName": f"{instance}.{table.schema}.{table.name}.{column_name}",
                         "name": column_name,
                         "type": column.type
                     }
@@ -134,7 +132,6 @@ class Atlas:
             if parent_column_guid:
                 params["entity"]['attributes']['column'] = { "guid": parent_column_guid, "typeName": "Column" }
 
-            print(params)
             guid = list(self.connection.entity_post.create(data=params)['guidAssignments'].values())[0]
 
             if column.fields:
@@ -144,13 +141,11 @@ class Atlas:
 
         return columns_guid
 
-    def delete_table(self, table):
-        table_guid = self.get_table_guid(f"{table.schema}.{table.name}")
+    def delete_table(self, table, instance=None):
+        table_guid = self.get_table_guid(f"{instance}.{table.schema}.{table.name}")
 
         if table_guid:
             for column in self.connection.entity_guid(table_guid).entity['relationshipAttributes']['columns']:
-                print(column)
-
                 self.delete(f"/v2/relationship/guid/{column['relationshipGuid']}")
                 self.delete(f"/v2/entity/guid/{column['guid']}")
 
